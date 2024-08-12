@@ -9,7 +9,7 @@ using SeleniumStealth.NET.Clients.Extensions;
 
 namespace KinopoiskFilmReviewsParser.Parsers.LinksParsers;
 
-public class KinopoiskTopСontroversialFilmsLinksParser : ILinkParser
+public class KinopoiskTopBestFilmsLinksParser : ILinkParser
 {
     private const string KinopoiskTopControversialFilmsPrimaryUrl = 
         "https://www.kinopoisk.ru/top/navigator/m_act[num_vote]/1000/m_act[rating]/1%3A6/m_act[tomat_rating]/%3A60/order/num_vote/perpage/200/#results";
@@ -22,7 +22,7 @@ public class KinopoiskTopСontroversialFilmsLinksParser : ILinkParser
     private IWebDriver _webDriver;
     
     
-    public KinopoiskTopСontroversialFilmsLinksParser(IWebDriver webDriver)
+    public KinopoiskTopBestFilmsLinksParser(IWebDriver webDriver)
     {
         _webDriver = webDriver;
     }
