@@ -30,11 +30,24 @@ public static class Startup
                              FileAccess.Read)) 
             filmsUrls = await JsonSerializer.DeserializeAsync<List<string>>(fs) ?? [];
         }
-        else 
+        else
+        {
+            BestFilmsSearchQuery query = new BestFilmsSearchQuery() 
+            {
+                MinimumNumberOfReviews = 1000,
+                RatingOfFilm = (1, 6),
+                RatingOfFilmByCritics = (0, 60)
+            };
+            LinksParserOptions options = new LinksParserOptions()
+            {
+                MaxLinksCount = 600,
+                NumberOfLinksSkipped = 400
+            };
             filmsUrls = await new KinopoiskTopBestFilmsLinksParser(new ChromeStealthDriverBuilder()
                     .AddCookie("https://www.kinopoisk.ru/", appSettings.KinopoiskParserSettings.Cookies)
-                    .BuildAsync().Result)
-                .GetLinksWithPrintAsync(400, jsonOptions);
+                    .BuildAsync().Result, query)
+                .GetLinksWithPrintAsync(options, jsonOptions, "TopControversialFilmsLinksV2_next600.json");
+        }
 
         List<Film> films = await new KinopoiskFilmsParser(() => new ChromeStealthDriverBuilder()
                 .AddCookie("https://www.kinopoisk.ru/", appSettings.KinopoiskParserSettings.Cookies)

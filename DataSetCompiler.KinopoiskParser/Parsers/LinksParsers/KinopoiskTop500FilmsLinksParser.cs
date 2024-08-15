@@ -1,8 +1,12 @@
-﻿using System.Collections.ObjectModel;
+﻿using System.Collections;
+using System.Collections.ObjectModel;
+using System.ComponentModel.DataAnnotations;
 using System.Text;
 using System.Text.Json;
+using DataSetCompiler.Core.DomainEntities;
 using DataSetCompiler.Core.Interfaces;
 using OpenQA.Selenium;
+using OpenQA.Selenium.DevTools.V85.DOM;
 using OpenQA.Selenium.Support.UI;
 using SeleniumExtras.WaitHelpers;
 using SeleniumStealth.NET.Clients.Extensions;
@@ -14,7 +18,8 @@ public class KinopoiskTop500FilmsLinksParser : ILinkParser
     #region Constants
 
     public const string FilmsTop500KinopoiskUrl = "https://www.kinopoisk.ru/lists/movies/top500/?sort=votes";
-    
+
+    private const int NumberFilms = 500;
     private const int NumberFilmLinksOnPage = 50;
 
     #endregion
@@ -31,10 +36,8 @@ public class KinopoiskTop500FilmsLinksParser : ILinkParser
 
     public KinopoiskTop500FilmsLinksParser(Func<IWebDriver> webDriverFactory)
     {
-        if (webDriverFactory is null)
-            throw new ArgumentNullException(nameof(webDriverFactory));
-        
-        _webDriver = webDriverFactory.Invoke();
+        _webDriver = webDriverFactory?.Invoke() 
+                     ?? throw new ArgumentNullException(nameof(webDriverFactory));
     }
 
     #endregion
@@ -42,25 +45,31 @@ public class KinopoiskTop500FilmsLinksParser : ILinkParser
 
     #region ILinkParser
 
-    public async Task<List<string>> GetLinksAsync(int maxLinksCount)
+    public async Task<List<string>> GetLinksAsync(LinksParserOptions options)
     {
-        int numberOfPages = CalculateNumberOfPagesToParse(maxLinksCount);
+        ValidateLinkParserOptions(options);
+        int firstPageNumber = CalculateNumberFirstPageToParse(options.NumberOfLinksSkipped);
+        int numberOfPages = CalculateNumberOfPagesToParse(options.NumberOfLinksSkipped,
+            options.MaxLinksCount);
         List<string> filmLinks = new();
         
-        for (int i = 1; i <= numberOfPages; i++)
+        for (int i = firstPageNumber; i <= numberOfPages + (firstPageNumber - 1); i++)
             filmLinks.AddRange(await GetFilmLinksFromPageAsync(i));
-        return (filmLinks.Count > maxLinksCount)? filmLinks[0..maxLinksCount] : filmLinks;
+        
+        int numberOfUnnecessaryLinks = options.NumberOfLinksSkipped % NumberFilmLinksOnPage;
+        return options.MaxLinksCount is null 
+            ? filmLinks[numberOfUnnecessaryLinks..] 
+            : filmLinks[numberOfUnnecessaryLinks..((int)options.MaxLinksCount + numberOfUnnecessaryLinks)];
     }
 
-    public async Task<List<string>> GetLinksWithPrintAsync(
-        int maxLinksCount,
-        JsonSerializerOptions serializerOptions,
+    public async Task<List<string>> GetLinksWithPrintAsync(LinksParserOptions options,
+        JsonSerializerOptions? serializerOptions = null,
         string outputFile = "LinksOnFilms.json")
     {
         if (String.IsNullOrEmpty(outputFile))
             throw new ArgumentException("Path to file was incorrect", nameof(outputFile));
 
-        List<string> links = await GetLinksAsync(maxLinksCount);
+        List<string> links = await GetLinksAsync(options);
         
         string linksJson = await Task.Run(() => JsonSerializer.Serialize(links, serializerOptions));
         using (var fs = new FileStream(outputFile, FileMode.Create))
@@ -76,6 +85,20 @@ public class KinopoiskTop500FilmsLinksParser : ILinkParser
 
 
     #region Methods
+
+    private void ValidateLinkParserOptions(LinksParserOptions options)
+    {
+        try
+        {
+            ValidationContext context = new ValidationContext(options);
+            Validator.ValidateObject(options, context, true);
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e);
+            throw;
+        }
+    }
 
     private async Task<List<string>> GetFilmLinksFromPageAsync(int pageNumber)
     {
@@ -102,14 +125,18 @@ public class KinopoiskTop500FilmsLinksParser : ILinkParser
         _webDriver.SpecialWait(new Random().Next(2000, 3000));
     }
     
-    private int CalculateNumberOfPagesToParse(int maxLinksCount)
+    private int CalculateNumberOfPagesToParse(int numberOfLinksSkipped, int? maxLinksCount)
     {
         if (maxLinksCount < 1)
             throw new ArgumentOutOfRangeException(nameof(maxLinksCount));
 
-        maxLinksCount = Math.Min(500, maxLinksCount);
-        return (int)Math.Ceiling((decimal)maxLinksCount / NumberFilmLinksOnPage);
+        int filmsNumber = NumberFilms - numberOfLinksSkipped;
+        filmsNumber = maxLinksCount is null ? filmsNumber : Math.Min(filmsNumber, (int)maxLinksCount);
+        return (int)Math.Ceiling((decimal)filmsNumber / NumberFilmLinksOnPage);
     }
+    
+    private int CalculateNumberFirstPageToParse(int numberOfLinksSkipped)
+        => numberOfLinksSkipped / NumberFilmLinksOnPage + 1;
 
     #endregion
 }

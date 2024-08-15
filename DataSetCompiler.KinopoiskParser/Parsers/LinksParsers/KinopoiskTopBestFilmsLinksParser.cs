@@ -1,6 +1,8 @@
 ﻿using System.Collections.ObjectModel;
+using System.ComponentModel.DataAnnotations;
 using System.Text;
 using System.Text.Json;
+using DataSetCompiler.Core.DomainEntities;
 using DataSetCompiler.Core.Interfaces;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Support.UI;
@@ -11,41 +13,46 @@ namespace KinopoiskFilmReviewsParser.Parsers.LinksParsers;
 
 public class KinopoiskTopBestFilmsLinksParser : ILinkParser
 {
-    private const string KinopoiskTopControversialFilmsPrimaryUrl = 
-        "https://www.kinopoisk.ru/top/navigator/m_act[num_vote]/1000/m_act[rating]/1%3A6/m_act[tomat_rating]/%3A60/order/num_vote/perpage/200/#results";
-    private const string KinopoiskTopControversialFilmsPageUrlFormat =
-        "https://www.kinopoisk.ru/top/navigator/m_act[num_vote]/1000/m_act[rating]/1:6/m_act[tomat_rating]/:60/order/num_vote/page/";
-
     private const int NumberFilmLinksOnPage = 200;
     
+    
+    private readonly string _postfixOfNumberOfMoviesPerPageUrl = $"perpage/{NumberFilmLinksOnPage}/";
     
     private IWebDriver _webDriver;
     
     
-    public KinopoiskTopBestFilmsLinksParser(IWebDriver webDriver)
+    public KinopoiskTopBestFilmsLinksParser(IWebDriver webDriver, BestFilmsSearchQuery filmsSearchQuery)
     {
-        _webDriver = webDriver;
+        _webDriver = webDriver ?? throw new ArgumentNullException(nameof(webDriver));
+        FilmsSearchQuery = filmsSearchQuery ?? throw new ArgumentNullException(nameof(filmsSearchQuery));
     }
     
     
-    public async Task<List<string>> GetLinksAsync(int maxLinksCount)
+    public async Task<List<string>> GetLinksAsync(LinksParserOptions options)
     {
-        int numberOfPages = await CalculateNumberOfPagesToParseAsync(maxLinksCount);
+        ValidateLinkParserOptions(options);
+        int firstPageNumber = CalculateNumberFirstPageToParse(options.NumberOfLinksSkipped);
+        int numberOfPages = await CalculateNumberOfPagesToParseAsync(options.NumberOfLinksSkipped,
+            options.MaxLinksCount);
         List<string> filmLinks = new();
         
-        for (int i = 1; i <= numberOfPages; i++)
+        for (int i = firstPageNumber; i <= numberOfPages + (firstPageNumber - 1); i++)
             filmLinks.AddRange(await GetFilmLinksFromPageAsync(i));
-        return (filmLinks.Count > maxLinksCount)? filmLinks[0..maxLinksCount] : filmLinks;
+
+        int numberOfUnnecessaryLinks = options.NumberOfLinksSkipped % NumberFilmLinksOnPage;
+        return options.MaxLinksCount is null 
+            ? filmLinks[numberOfUnnecessaryLinks..] 
+            : filmLinks[numberOfUnnecessaryLinks..((int)options.MaxLinksCount + numberOfUnnecessaryLinks)];
     }
 
-    public async Task<List<string>> GetLinksWithPrintAsync(int maxLinksCount,
-        JsonSerializerOptions serializerOptions,
+    public async Task<List<string>> GetLinksWithPrintAsync(LinksParserOptions options,
+        JsonSerializerOptions? serializerOptions = null,
         string outputFile = "TopControversialFilmsLinks.json")
     {
         if (String.IsNullOrEmpty(outputFile))
             throw new ArgumentException("Path to file was incorrect", nameof(outputFile));
 
-        List<string> links = await GetLinksAsync(maxLinksCount);
+        List<string> links = await GetLinksAsync(options);
         
         string linksJson = await Task.Run(() => JsonSerializer.Serialize(links, serializerOptions));
         using (var fs = new FileStream(outputFile, FileMode.Create))
@@ -56,15 +63,45 @@ public class KinopoiskTopBestFilmsLinksParser : ILinkParser
 
         return links;
     }
+
+
+    public BestFilmsSearchQuery FilmsSearchQuery { get; }
+
+    private string MainUrlOfFilmsSearchResults => FilmsSearchQuery.Url + _postfixOfNumberOfMoviesPerPageUrl;
+
+
+    private void ValidateLinkParserOptions(LinksParserOptions options)
+    {
+        try
+        {
+            ValidationContext context = new ValidationContext(options);
+            Validator.ValidateObject(options, context, true);
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e);
+            throw;
+        }
+    }
     
+    private int CalculateNumberFirstPageToParse(int numberOfLinksSkipped)
+        => numberOfLinksSkipped / NumberFilmLinksOnPage + 1;
     
-    private async Task<int> CalculateNumberOfPagesToParseAsync(int maxLinksCount)
+    private async Task<int> CalculateNumberOfPagesToParseAsync(int numberOfLinksSkipped, int? maxLinksCount)
     {
         if (maxLinksCount < 1)
             throw new ArgumentOutOfRangeException(nameof(maxLinksCount));
 
-        maxLinksCount = Math.Min(await GetFilmsNumberAsync(), maxLinksCount);
-        return (int)Math.Ceiling((decimal)maxLinksCount / NumberFilmLinksOnPage);
+        int filmsNumber = await GetFilmsNumberAsync();
+        int useFullFilmsNumber = filmsNumber - numberOfLinksSkipped;
+        if (useFullFilmsNumber <= 0)
+            return 0;
+        
+        useFullFilmsNumber = maxLinksCount is null 
+            ? useFullFilmsNumber 
+            : Math.Min(useFullFilmsNumber, (int)maxLinksCount);
+        
+        return (int)Math.Ceiling((decimal)useFullFilmsNumber / NumberFilmLinksOnPage);
     }
 
     private async Task<List<string>> GetFilmLinksFromPageAsync(int pageNumber)
@@ -86,9 +123,9 @@ public class KinopoiskTopBestFilmsLinksParser : ILinkParser
     private async Task GoToFilmsTopPageAsync(int pageNumber = 0)
     {
         if(pageNumber <= 0)
-            await _webDriver.Navigate().GoToUrlAsync(KinopoiskTopControversialFilmsPrimaryUrl);
+            await _webDriver.Navigate().GoToUrlAsync(MainUrlOfFilmsSearchResults);
         else
-            await _webDriver.Navigate().GoToUrlAsync(KinopoiskTopControversialFilmsPageUrlFormat + pageNumber);
+            await _webDriver.Navigate().GoToUrlAsync(MainUrlOfFilmsSearchResults + $"page/{pageNumber}/");
         
         WebDriverWait wait = new WebDriverWait(_webDriver, TimeSpan.FromSeconds(40));
         wait.Until(ExpectedConditions.ElementIsVisible(By.Id("itemList")));
