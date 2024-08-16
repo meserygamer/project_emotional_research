@@ -45,8 +45,9 @@ public class KinopoiskFilmsParserWorker
             while (filmsUrls.TryDequeue(out string? filmUrl))
             {
                 films.Add(await GetFilmDataAsync(filmUrl));
-                filmsNumberBeforeDriverChange = (filmsNumberBeforeDriverChange is null)?
-                    null : filmsNumberBeforeDriverChange - 1;
+                filmsNumberBeforeDriverChange = (filmsNumberBeforeDriverChange is null)
+                    ? null 
+                    : filmsNumberBeforeDriverChange - 1;
                 if (filmsNumberBeforeDriverChange is not null && filmsNumberBeforeDriverChange <= 0)
                 {
                     ChangeWebDriver();
@@ -68,7 +69,7 @@ public class KinopoiskFilmsParserWorker
         if (String.IsNullOrEmpty(urlOnFilm))
             throw new ArgumentNullException(nameof(urlOnFilm));
         
-        await LoadFilmReviewsPageAsync(urlOnFilm);
+        await LoadFilmReviewsPageAsync(urlOnFilm, needToWaitForReviewsToLoad: false);
         
         Film filmData = new SeleniumDomExceptionHandler().MakeManyRequestsForDom(() =>
         {
@@ -87,15 +88,21 @@ public class KinopoiskFilmsParserWorker
         return filmData;
     }
     
-    private async Task LoadFilmReviewsPageAsync(string filmUrl, int numberOfPage = 1)
+    private async Task LoadFilmReviewsPageAsync(string filmUrl,
+        bool needToWaitForReviewsToLoad = true,
+        int numberOfPage = 1)
     {
-        string reviewPageUrl = new StringBuilder(filmUrl).Append(KinopoiskReviewsPagePostfix)
+        string reviewPageUrl = new StringBuilder(filmUrl)
+            .Append(KinopoiskReviewsPagePostfix)
             .Append(numberOfPage)
             .Append("/")
             .ToString();
         await _currentWebDriver.Navigate().GoToUrlAsync(reviewPageUrl);
-        WebDriverWait wait = new WebDriverWait(_currentWebDriver, TimeSpan.FromSeconds(40));
-        await Task.Run(() => wait.Until(ExpectedConditions.ElementIsVisible(By.ClassName("userReview"))));
+        if (needToWaitForReviewsToLoad)
+        {
+            WebDriverWait wait = new WebDriverWait(_currentWebDriver, TimeSpan.FromSeconds(40));
+            await Task.Run(() => wait.Until(ExpectedConditions.ElementIsVisible(By.ClassName("userReview"))));
+        }
         _currentWebDriver.SpecialWait(new Random().Next(1500, 2000));
     }
     
@@ -110,7 +117,7 @@ public class KinopoiskFilmsParserWorker
         List<Review> reviewsOnFilm = new List<Review>();
         for (int i = 1; i <= numberOfReviewsPage; i++)
         {
-            await LoadFilmReviewsPageAsync(urlOnFilm, i);
+            await LoadFilmReviewsPageAsync(urlOnFilm, numberOfPage: i);
             reviewsOnFilm.AddRange(GetReviewsByPage());
         }
 
@@ -119,13 +126,13 @@ public class KinopoiskFilmsParserWorker
     
     private int GetNumberOfReviewsForFilm()
     {
-        return new SeleniumDomExceptionHandler().MakeManyRequestsForDom(() =>
+        return new SeleniumDomExceptionHandler().MakeManyRequestsForDomWithHandler(() =>
         {
             IWebElement reviewsCounter = 
                 _currentWebDriver.FindElement(By.ClassName("pagesFromTo"));
             string reviewsCounterText = reviewsCounter.Text.Split(' ')[2];
             return Convert.ToInt32(reviewsCounterText);
-        });
+        }, null, 20);
     }
     
     private List<Review> GetReviewsByPage()

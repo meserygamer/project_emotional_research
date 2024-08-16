@@ -36,4 +36,21 @@ public class SeleniumDomExceptionHandler
         throw new WebException("timeout of requests to DOM tree");
     }
     
+    public T? MakeManyRequestsForDomWithHandler<T>(Func<T> requestForDom, Action? handler, int attemptsNumber = 5)
+    {
+        for (int nTry = 0; nTry < attemptsNumber; nTry++)
+        {
+            try
+            {
+                return requestForDom.Invoke();
+            }
+            catch(Exception e)
+            {
+                Console.WriteLine(e.Message);
+            }
+        }
+        handler?.Invoke();
+        return default;
+    }
+    
 }
